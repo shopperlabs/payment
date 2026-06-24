@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Shopper\Payment\Services;
 
 use Illuminate\Support\Collection;
+use Shopper\Core\Actions\ReleaseCampaignBudget;
 use Shopper\Core\Enum\PaymentStatus;
 use Shopper\Core\Models\Contracts\Order;
 use Shopper\Core\Models\PaymentMethod;
@@ -13,6 +14,7 @@ use Shopper\Payment\Contracts\PaymentDriver;
 use Shopper\Payment\DataTransferObjects\PaymentResult;
 use Shopper\Payment\Enum\TransactionStatus;
 use Shopper\Payment\Enum\TransactionType;
+use Shopper\Payment\Events\PaymentFailed;
 use Shopper\Payment\Facades\Payment;
 use Shopper\Payment\Models\PaymentTransaction;
 
@@ -143,6 +145,8 @@ final class PaymentProcessingService
 
         $this->syncPaymentStatus($order, TransactionType::Refund, $result);
 
+        $this->releaseCampaignBudget($order);
+
         return $result;
     }
 
@@ -195,6 +199,26 @@ final class PaymentProcessingService
             ->value('reference');
     }
 
+    /**
+     * Give the campaign budget back once an order is fully refunded, so a
+     * reversed redemption stops counting against the cap. Partial refunds keep
+     * the reservation, and the release action is idempotent on retries.
+     */
+    private function releaseCampaignBudget(Order $order): void
+    {
+        if ($order->refresh()->payment_status !== PaymentStatus::Refunded) {
+            return;
+        }
+
+        $campaign = $order->discount?->campaign;
+
+        if ($campaign === null) {
+            return;
+        }
+
+        resolve(ReleaseCampaignBudget::class)->execute($campaign, $order->getKey(), actor: 'order-refunded');
+    }
+
     private function resolveDriver(PaymentMethod $method): PaymentDriver
     {
         return Payment::driver($method->driver ?? 'manual');
@@ -203,6 +227,10 @@ final class PaymentProcessingService
     private function syncPaymentStatus(Order $order, TransactionType $type, PaymentResult $result): void
     {
         if (! $result->success) {
+            if (in_array($type, [TransactionType::Authorize, TransactionType::Capture, TransactionType::Refund], strict: true)) {
+                event(new PaymentFailed($order, $type, $result->message));
+            }
+
             return;
         }
 

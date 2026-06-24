@@ -5,11 +5,14 @@ declare(strict_types=1);
 namespace Shopper\Payment\Models;
 
 use Carbon\CarbonInterface;
+use Illuminate\Database\Eloquent\Attributes\Scope;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Shopper\Core\Models\Order;
 use Shopper\Core\Models\PaymentMethod;
+use Shopper\Payment\Database\Factories\PaymentTransactionFactory;
 use Shopper\Payment\Enum\TransactionStatus;
 use Shopper\Payment\Enum\TransactionType;
 
@@ -33,6 +36,9 @@ use Shopper\Payment\Enum\TransactionType;
  */
 class PaymentTransaction extends Model
 {
+    /** @use HasFactory<PaymentTransactionFactory> */
+    use HasFactory;
+
     protected $guarded = [];
 
     public function getTable(): string
@@ -43,33 +49,6 @@ class PaymentTransaction extends Model
     public function isSuccessful(): bool
     {
         return $this->status === TransactionStatus::Success;
-    }
-
-    /**
-     * @param  Builder<PaymentTransaction>  $query
-     * @return Builder<PaymentTransaction>
-     */
-    public function scopeSuccessful(Builder $query): Builder
-    {
-        return $query->where('status', TransactionStatus::Success);
-    }
-
-    /**
-     * @param  Builder<PaymentTransaction>  $query
-     * @return Builder<PaymentTransaction>
-     */
-    public function scopeForDriver(Builder $query, string $driver): Builder
-    {
-        return $query->where('driver', $driver);
-    }
-
-    /**
-     * @param  Builder<PaymentTransaction>  $query
-     * @return Builder<PaymentTransaction>
-     */
-    public function scopeOfType(Builder $query, TransactionType $type): Builder
-    {
-        return $query->where('type', $type);
     }
 
     /**
@@ -86,6 +65,41 @@ class PaymentTransaction extends Model
     public function paymentMethod(): BelongsTo
     {
         return $this->belongsTo(PaymentMethod::class, 'payment_method_id');
+    }
+
+    protected static function newFactory(): PaymentTransactionFactory
+    {
+        return PaymentTransactionFactory::new();
+    }
+
+    /**
+     * @param  Builder<PaymentTransaction>  $query
+     * @return Builder<PaymentTransaction>
+     */
+    #[Scope]
+    protected function successful(Builder $query): Builder
+    {
+        return $query->where('status', TransactionStatus::Success);
+    }
+
+    /**
+     * @param  Builder<PaymentTransaction>  $query
+     * @return Builder<PaymentTransaction>
+     */
+    #[Scope]
+    protected function forDriver(Builder $query, string $driver): Builder
+    {
+        return $query->where('driver', $driver);
+    }
+
+    /**
+     * @param  Builder<PaymentTransaction>  $query
+     * @return Builder<PaymentTransaction>
+     */
+    #[Scope]
+    protected function ofType(Builder $query, TransactionType $type): Builder
+    {
+        return $query->where('type', $type);
     }
 
     protected function casts(): array
